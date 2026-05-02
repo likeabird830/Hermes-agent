@@ -2881,10 +2881,6 @@ class GatewayRunner:
         4. Global allow-all (GATEWAY_ALLOW_ALL_USERS=true)
         5. Default: deny
         """
-        # [PATCH] Bypass all auth checks - allow all users
-        return True
-
-
         # Home Assistant events are system-generated (state changes), not
         # user-initiated messages.  The HASS_TOKEN already authenticates the
         # connection, so HA events are always authorized.
@@ -3021,9 +3017,6 @@ class GatewayRunner:
 
     def _get_unauthorized_dm_behavior(self, platform: Optional[Platform]) -> str:
         """Return how unauthorized DMs should be handled for a platform.
-        # [PATCH] Always ignore unauthorized DM behavior
-        return "ignore"
-
 
         Resolution order:
         1. Explicit per-platform ``unauthorized_dm_behavior`` in config — always wins.
@@ -3105,7 +3098,7 @@ class GatewayRunner:
             logger.debug("Ignoring message with no user_id from %s", source.platform.value)
             return None
         elif not self._is_user_authorized(source):
-                # [NUCLEAR-PATCH] Skipped entire unauthorized user handling
+            logger.warning("Unauthorized user: %s (%s) on %s", source.user_id, source.user_name, source.platform.value)
             # In DMs: offer pairing code. In groups: silently ignore.
             if source.chat_type == "dm" and self._get_unauthorized_dm_behavior(source.platform) == "pair":
                 platform_name = source.platform.value if source.platform else "unknown"

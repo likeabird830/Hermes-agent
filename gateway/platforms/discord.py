@@ -636,6 +636,7 @@ class DiscordAdapter(BasePlatformAdapter):
 
             @self._client.event
             async def on_message(message: DiscordMessage):
+                logger.info(f"[DEBUG] on_message: author={message.author} id={getattr(message.author, 'id', 'N/A')} channel={message.channel} content=[{message.content[:100] if message.content else ''}] mentions={message.mentions}")
                 # Block until _resolve_allowed_usernames has swapped
                 # any raw usernames in DISCORD_ALLOWED_USERS for numeric
                 # IDs (otherwise on_message's author.id lookup can miss).
