@@ -1,0 +1,23 @@
+# Render deployment config - Lightweight gateway-only mode
+# Ignores heavy Dockerfile, uses Python 3 runtime instead
+
+services:
+  - type: web
+    name: hermes-gateway
+    runtime: python
+    plan: free
+    buildCommand: |
+      pip install uv &&
+      uv pip install --system -e ".[messaging]" &&
+      echo "Build complete"
+    startCommand: hermes --gateway
+    healthCheckPath: /
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false  
+      - key: TAVILY_API_KEY
+        sync: false
