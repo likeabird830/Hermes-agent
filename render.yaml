@@ -10,7 +10,6 @@ services:
     buildCommand: pip install discord.py aiohttp
     startCommand: python hermes_lite.py
     healthCheckPath: /
-    healthCheckInterval: 60
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
