@@ -1,9 +1,13 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-COPY requirements-lite.txt .
-RUN pip install --no-cache-dir -r requirements-lite.txt
+
+# Install only what we need
+RUN pip install --no-cache-dir discord.py aiohttp
+
 COPY hermes_lite.py .
 
+# Unbuffered output
 ENV PYTHONUNBUFFERED=1
+
 CMD ["python", "-u", "hermes_lite.py"]

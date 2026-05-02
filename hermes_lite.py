@@ -1,190 +1,207 @@
+#!/usr/bin/env python3
 """
-Ultra-lightweight Discord Bot for Render Free Tier
-Debug-friendly version with full error output
+Hermes Lite - Ultra lightweight Discord bot for Render
+Only Discord + DeepSeek + Tavily, ~50MB RAM
 """
 
-import os
 import sys
+import os
+import asyncio
 import traceback
+import datetime
 
-print("=== HERMES LITE STARTING ===", flush=True)
-print(f"Python version: {sys.version}", flush=True)
+LOG_FILE = "/tmp/hermes_lite.log"
 
-# Check env vars BEFORE importing anything
-for var in ("DISCORD_BOT_TOKEN", "DEEPSEEK_API_KEY", "TAVILY_API_KEY"):
-    val = os.environ.get(var, "")
-    print(f"{var}: {'SET (' + val[:8] + '...)' if val else 'MISSING!'}", flush=True)
+def log(msg):
+    ts = datetime.datetime.now().isoformat()
+    line = f"[{ts}] {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+            f.flush()
+    except:
+        pass
 
-try:
-    import asyncio
-    print("✓ asyncio imported", flush=True)
-    
-    import discord
-    from discord.ext import commands
-    print(f"✓ discord.py v{discord.__version__} imported", flush=True)
-    
-    import httpx
-    print(f"✓ httpx imported", flush=True)
-    
-except ImportError as e:
-    print(f"✗ IMPORT FAILED: {e}", flush=True)
+def log_error(msg):
+    log(f"ERROR: {msg}")
     traceback.print_exc()
-    sys.exit(1)
 
-# ─── Config ────────────────────────────────────
-DISCORD_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
-TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
+log("=== HERMES LITE STARTING ===")
+log(f"Python: {sys.version}")
+log(f"Args: {sys.argv}")
+
+# Check environment
+DISCORD_TOKEN = os.environ.get('DISCORD_BOT_TOKEN', '')
+DEEPSEEK_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
+TAVILY_KEY = os.environ.get('TAVILY_API_KEY', '')
+
+log(f"DISCORD_TOKEN set: {bool(DISCORD_TOKEN)}")
+log(f"DEEPSEEK_KEY set: {bool(DEEPSEEK_KEY)}")
+log(f"TAVILY_KEY set: {bool(TAVILY_KEY)}")
 
 if not DISCORD_TOKEN:
-    print("FATAL: DISCORD_BOT_TOKEN not set!", flush=True)
+    log("FATAL: DISCORD_BOT_TOKEN not set!")
     sys.exit(1)
-if not DEEPSEEK_API_KEY:
-    print("FATAL: DEEPSEEK_API_KEY not set!", flush=True)
+if not DEEPSEEK_KEY:
+    log("FATAL: DEEPSEEK_API_KEY not set!")
     sys.exit(1)
 
-ALLOWED_USER_ID = int(os.environ.get("ALLOWED_USER_ID", "869299535271329872"))
-REQUIRE_MENTION = True
+log("Environment OK, importing libraries...")
 
+try:
+    import discord
+    log("discord.py imported OK")
+except Exception as e:
+    log_error(f"Failed to import discord: {e}")
+    sys.exit(1)
 
-# ─── DeepSeek API ──────────────────────────────
-async def call_deepseek(messages: list, max_tokens: int = 2048) -> str:
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            "https://api.deepseek.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "deepseek-chat",
-                "messages": messages,
-                "max_tokens": max_tokens,
-            },
-        )
-        data = resp.json()
-        if "error" in data:
-            return f"⚠️ DeepSeek Error: {data['error'].get('message', 'unknown')}"
-        return data["choices"][0]["message"]["content"]
+try:
+    import aiohttp
+    log("aiohttp imported OK")
+except Exception as e:
+    log_error(f"Failed to import aiohttp: {e}")
+    sys.exit(1)
 
+from discord.ext import commands
 
-# ─── Tavily Search ─────────────────────────────
-async def tavily_search(query: str, max_results: int = 5) -> str:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            "https://api.tavily.com/search",
-            headers={"Content-Type": "application/json"},
-            json={
-                "api_key": TAVILY_API_KEY,
-                "query": query,
-                "max_results": max_results,
-                "include_answer": True,
-            },
-        )
-        data = resp.json()
-        result = ""
-        if data.get("answer"):
-            result = f"📌 **Summary:**\n{data['answer']}\n\n"
-        result += "**Sources:**\n"
-        for i, item in enumerate(data.get("results", []), 1):
-            result += f"{i}. [{item.get('title', 'No title')}]({item.get('url', '')})\n"
-        return result
+log("All imports OK, setting up bot...")
 
-
-# ─── Message Handler ───────────────────────────
-async def handle_message(bot: commands.Bot, message: discord.Message):
-    try:
-        async with message.channel.typing():
-            content = message.content.strip()
-
-            # Remove mention
-            for m in [f"<@!{bot.user.id}>", f"<@{bot.user.id}>"]:
-                content = content.replace(m, "").strip()
-
-            if not content:
-                await message.reply("Hi! 👋 How can I help?")
-                return
-
-            # Check for search command
-            use_search = False
-            lower = content.lower().strip()
-            if lower.startswith(("search ", "/search ", "!search ", "搜")):
-                use_search = True
-                content = content.split(None, 1)[1] if len(content.split()) > 1 else content
-
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are Hermes, a helpful AI assistant running on Discord. "
-                        "You help users with questions, research, coding, and general tasks. "
-                        "Be concise but thorough. Respond in the same language the user uses."
-                    ),
-                }
-            ]
-
-            if use_search and TAVILY_API_KEY:
-                sr = await tavily_search(content)
-                messages.append({"role": "user", "content": f"Search:\n{sr}\n\nQuestion: {content}"})
-            else:
-                messages.append({"role": "user", "content": content})
-
-            reply = await call_deepseek(messages)
-
-            # Discord 2000 char limit
-            if len(reply) <= 2000:
-                await message.reply(reply)
-            else:
-                chunks = [reply[i:i+1900] for i in range(0, len(reply), 1900)]
-                await message.reply(chunks[0])
-                for chunk in chunks[1:]:
-                    await message.channel.send(chunk)
-
-    except Exception as e:
-        print(f"[ERROR] {e}", flush=True)
-        traceback.print_exc()
-        try:
-            await message.reply(f"❌ Error: `{str(e)[:200]}`")
-        except Exception:
-            pass
-
-
-# ─── Bot Setup ─────────────────────────────────
+# Bot setup
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix='!', intents=intents)
 
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
+
+async def ask_deepseek(messages):
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "deepseek-chat",
+        "messages": messages,
+        "max_tokens": 2000,
+        "temperature": 0.7
+    }
+    
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(DEEPSEEK_URL, headers=headers, json=payload) as resp:
+            text = await resp.text()
+            if resp.status == 200:
+                data = await resp.json()
+                return data['choices'][0]['message']['content']
+            else:
+                return f"DeepSeek API error {resp.status}: {text[:200]}"
+
+async def search_tavily(query):
+    if not TAVILY_KEY:
+        return None
+    
+    url = "https://api.tavily.com/search"
+    payload = {
+        "api_key": TAVILY_KEY,
+        "query": query,
+        "max_results": 5,
+        "search_depth": "basic"
+    }
+    
+    timeout = aiohttp.ClientTimeout(total=15)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                results = data.get('results', [])
+                if results:
+                    return "\n".join([f"• {r['title']}: {r['url']}" for r in results[:3]])
+            return None
 
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user.name} ({bot.user.id})", flush=True)
-
+    log(f'Hermes Lite READY! Logged in as {bot.user}')
 
 @bot.event
 async def on_message(message):
-    # Ignore own messages
-    if message.author.bot:
+    if message.author == bot.user:
         return
-    # DMs: always respond
-    if isinstance(message.channel, discord.DMChannel):
-        await handle_message(bot, message)
+    
+    if not bot.user.mentioned_in(message):
         return
-    # Server: require mention
-    if REQUIRE_MENTION:
-        if bot.user.id in [m.id for m in message.mentions]:
-            await handle_message(bot, message)
+    
+    content = message.content
+    for uid in [bot.user.id, f'<@!{bot.user.id}>']:
+        content = content.replace(uid, '')
+    content = content.strip()
+    
+    if not content:
+        await message.reply("Hi! I'm Hermes Lite. Ask me anything or use `!search <query>`.")
+        return
+    
+    async with message.channel.typing():
+        is_search = content.lower().startswith(('search ', '!search ', '/search '))
+        
+        if is_search:
+            query = content.split(' ', 1)[-1].strip()
+            search_results = await search_tavily(query)
+            if search_results:
+                prompt = f"Search results for '{query}':\n{search_results}\n\nAnswer based on these results."
+            else:
+                prompt = query
+        else:
+            prompt = content
+        
+        messages = [
+            {"role": "system", "content": "You are Hermes, a helpful and concise AI assistant."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = await ask_deepseek(messages)
+            if len(response) > 1900:
+                response = response[:1900] + "..."
+            await message.reply(response)
+        except Exception as e:
+            log_error(f"Error in on_message: {e}")
+            await message.reply(f"Error: {str(e)[:200]}")
 
+@bot.command(name='search')
+async def search_cmd(ctx, *, query):
+    if not TAVILY_KEY:
+        await ctx.send("Search not configured.")
+        return
+    async with ctx.typing():
+        results = await search_tavily(query)
+        if results:
+            await ctx.send(f"**Results for:** {query}\n{results}")
+        else:
+            await ctx.send("No results found.")
 
-# ─── Main ──────────────────────────────────────
-print("Starting Hermes Lite...", flush=True)
+@bot.command(name='ping')
+async def ping_cmd(ctx):
+    await ctx.send(f'Pong! {round(bot.latency * 1000)}ms')
+
+@bot.command(name='ask')
+async def ask_cmd(ctx, *, question):
+    async with ctx.typing():
+        messages = [
+            {"role": "system", "content": "You are Hermes, a helpful AI assistant."},
+            {"role": "user", "content": question}
+        ]
+        try:
+            response = await ask_deepseek(messages)
+            if len(response) > 1900:
+                response = response[:1900] + "..."
+            await ctx.send(response)
+        except Exception as e:
+            await ctx.send(f"Error: {str(e)[:200]}")
+
+log("Bot setup complete, starting bot.run()...")
 
 try:
-    bot.run(DISCORD_TOKEN)
-except KeyboardInterrupt:
-    print("Bot stopped.", flush=True)
+    bot.run(DISCORD_TOKEN, log_handler=None)
 except Exception as e:
-    print(f"FATAL ERROR: {e}", flush=True)
-    traceback.print_exc()
+    log_error(f"FATAL in bot.run(): {e}")
     sys.exit(1)
