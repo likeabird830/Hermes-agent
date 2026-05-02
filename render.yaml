@@ -1,6 +1,3 @@
-# Render Blueprint - Python Native Runtime (NO Docker!)
-# Much lighter than Docker containers, works on free tier
-
 services:
   - type: web
     name: hermes-gateway
@@ -9,7 +6,6 @@ services:
     plan: free
     buildCommand: pip install discord.py aiohttp
     startCommand: python hermes_lite.py
-    healthCheckPath: /
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
