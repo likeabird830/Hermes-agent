@@ -1,23 +1,22 @@
-# Render deployment config - Lightweight gateway-only mode
-# Ignores heavy Dockerfile, uses Python 3 runtime instead
+# Render Blueprint - Python Native Runtime (NO Docker!)
+# Much lighter than Docker containers, works on free tier
 
 services:
   - type: web
     name: hermes-gateway
     runtime: python
+    region: oregon
     plan: free
-    buildCommand: |
-      pip install uv &&
-      uv pip install --system -e ".[messaging]" &&
-      echo "Build complete"
-    startCommand: hermes --gateway
+    buildCommand: pip install discord.py aiohttp
+    startCommand: python hermes_lite.py
     healthCheckPath: /
+    healthCheckInterval: 60
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: DISCORD_BOT_TOKEN
         sync: false
       - key: DEEPSEEK_API_KEY
-        sync: false  
+        sync: false
       - key: TAVILY_API_KEY
         sync: false
